@@ -1,71 +1,55 @@
 use std::fmt;
 
-#[derive(Debug)]
-struct PasswordData {
-    password: String,
-    levels_bitmask: u16,
-    acorns_bitmask: u16,
-}
-
-impl PasswordData {
-    fn is_obtainable(&self) -> bool {
-        let level_order_ok = (self.levels_bitmask + 1).is_power_of_two();
-        let acorns_ok = self.acorns_bitmask & (self.levels_bitmask >> 1) == self.acorns_bitmask;
-
-        level_order_ok && acorns_ok
-    }
-}
-
-impl fmt::Display for PasswordData {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}", self.password)?;
-        if self.is_obtainable() {
-            write!(f, " (obtainable)")?;
-        } else {
-            write!(f, " (unobtainable)")?;
-        }
-        writeln!(f)?;
-
-        write!(f, "Levels:")?;
-        for i in 0..=10 {
-            let c = if (self.levels_bitmask >> i) & 1 == 1 {
-                'X'
-            } else {
-                '-'
-            };
-            write!(f, " {}", c)?;
-        }
-        writeln!(f, " ({})", self.levels_bitmask)?;
-
-        write!(f, "Acorns:")?;
-        for i in 0..=10 {
-            let c = if (self.acorns_bitmask >> i) & 1 == 1 {
-                'X'
-            } else {
-                '-'
-            };
-            write!(f, " {}", c)?;
-        }
-        writeln!(f, " ({})", self.acorns_bitmask)?;
-
-        Ok(())
-    }
-}
-
-const CHARACTER_SET: &[char; 17] = &[
-    'B', 'C', 'D', 'F', 'G', 'H', 'J', 'K', 'L', 'M', 'N', 'P', 'Q', 'R', 'S', 'T', 'V',
-];
-
 /*
     Memory locations:
-    08004D80 - Password validation code
+    08004D0C - Password encoding routine
+    08004D80 - Password decoding routine
     03005040 - Password data
     03005048 - Password length
     03005050 - Password cursor
     03004D84 - Levels bitmask
     03002A08 - Acorns bitmask
+    08144D74 - Hardcoded password pointers
+    08144D54 - Hardcoded password data
 */
-fn process_password(password: &str) -> Result<PasswordData, &str> {
+
+const CHARACTER_SET: &[char; 17] = &[
+    'B', 'C', 'D', 'F', 'G', 'H', 'J', 'K', 'L', 'M', 'N', 'P', 'Q', 'R', 'S', 'T', 'V',
+];
+
+#[derive(Debug)]
+struct SaveData {
+    level_bitmask: u16,
+    acorn_bitmask: u16,
+}
+
+impl SaveData {
+    fn is_obtainable(&self) -> bool {
+        // TODO: Fix level 10
+        let level_order_ok = (self.level_bitmask + 1).is_power_of_two();
+        let acorns_ok = self.acorn_bitmask & (self.level_bitmask >> 1) == self.acorn_bitmask;
+
+        level_order_ok && acorns_ok
+    }
+}
+
+impl fmt::Display for SaveData {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "[ ")?;
+        for i in 0..10 {
+            match ((self.level_bitmask >> i) & 1, (self.acorn_bitmask >> i) & 1) {
+                (0, 0) => write!(f, "- ")?,
+                (1, 0) => write!(f, "x ")?,
+                (1, 1) => write!(f, "A ")?,
+                (_, _) => write!(f, "? ")?,
+            }
+        }
+        write!(f, "]")?;
+        Ok(())
+    }
+}
+
+fn decode_password(password: &str) -> Result<SaveData, &str> {
     let values: Vec<u32> = password
         .chars()
         .enumerate()
@@ -80,15 +64,15 @@ fn process_password(password: &str) -> Result<PasswordData, &str> {
 
     // TODO: Cleanup
 
-    let is_valid_password =
+    let is_checksum_valid =
         (((((values[1] + values[2] & 0xFF) + values[3] & 0xFF) + values[4] & 0xFF) + values[5])
             * 0x1000000
             & 0xF000000)
             >> 0x18
             == values[0];
 
-    if !is_valid_password {
-        return Result::Err("Invalid password");
+    if !is_checksum_valid {
+        return Result::Err("Invalid checksum");
     }
 
     let var_5 = (values[3] - 3 & 0xC) as i32 >> 2;
@@ -113,58 +97,37 @@ fn process_password(password: &str) -> Result<PasswordData, &str> {
     }
 
     if var_1 {
-        let levels_bitmask: u16 = var_2 as u16 | var_5 as u16;
-        let acorns_bitmask: u16 = ((values[3] - 3 & 0x03) << 8) as u16
+        let level_bitmask: u16 = var_2 as u16 | var_5 as u16;
+        let acorn_bitmask: u16 = ((values[3] - 3 & 0x03) << 8) as u16
             | (values[4] as u16 - 4) * 0x10
             | values[5] as u16 - 5;
-        Result::Ok(PasswordData {
-            password: password.to_owned(),
-            levels_bitmask,
-            acorns_bitmask,
+        Result::Ok(SaveData {
+            level_bitmask,
+            acorn_bitmask,
         })
     } else {
         Result::Err("Invalid password")
     }
 }
 
-/*
-    Memory locations:
-    08144D74 - Hardcoded password pointers
-    08144D54 - Hardcoded password data
-*/
-fn reverse_hardcoded_password(values: &[u8]) -> String {
-    values
+fn encode_password(save_data: &SaveData) -> String {
+    let mut password: [u8; 6] = [0, 0, 0, 0, 0, 0];
+
+    let level = save_data.level_bitmask;
+    let acorn = save_data.acorn_bitmask;
+
+    password[1] = 1 + ((level & 0x3C0) >> 6) as u8;
+    password[2] = 2 + ((level & 0x03C) >> 2) as u8;
+    password[3] = 3 + ((((level & 0x003) << 2) as u8) | ((acorn >> 8) as u8 & 0x003));
+    password[4] = 4 + ((acorn & 0x0F0) >> 4) as u8;
+    password[5] = 5 + ((acorn & 0x00F) >> 0) as u8;
+    password[0] = (password[1] + password[2] + password[3] + password[4] + password[5]) & 0x0F;
+
+    password
         .iter()
         .enumerate()
-        .map(|(index, &value)| CHARACTER_SET[value as usize - index as usize])
+        .map(|(i, &v)| CHARACTER_SET[v as usize - i])
         .collect()
-}
-
-fn main_brute_force() {
-    let mut password: [char; 6] = [' ', ' ', ' ', ' ', ' ', ' '];
-    for &p0 in CHARACTER_SET.iter() {
-        password[0] = p0;
-        for &p1 in CHARACTER_SET.iter() {
-            password[1] = p1;
-            for &p2 in CHARACTER_SET.iter() {
-                password[2] = p2;
-                for &p3 in CHARACTER_SET.iter() {
-                    password[3] = p3;
-                    for &p4 in CHARACTER_SET.iter() {
-                        password[4] = p4;
-                        for &p5 in CHARACTER_SET.iter() {
-                            password[5] = p5;
-
-                            let p: String = password.iter().collect();
-                            if let Ok(r) = process_password(&p) {
-                                println!("{}", r);
-                            }
-                        }
-                    }
-                }
-            }
-        }
-    }
 }
 
 fn main_test_passwords() {
@@ -174,7 +137,7 @@ fn main_test_passwords() {
     ];
 
     for test in tests {
-        println!("{}: {:?}", test, process_password(test));
+        println!("{}: {:?}", test, decode_password(test));
     }
 }
 
@@ -188,12 +151,38 @@ fn main_hardcoded_passwords() {
     ];
 
     for hp in hardcoded_password.iter() {
-        println!("Hardcoded password: {}", reverse_hardcoded_password(hp));
+        let password: String = hp
+            .iter()
+            .enumerate()
+            .map(|(index, &value)| CHARACTER_SET[value as usize - index as usize])
+            .collect();
+        println!("{} -> Art gallery", password);
+    }
+}
+
+fn main_dump_valid_level_passwords() {
+    for level in 1..=10 {
+        let level_bitmask = 2u16.pow(level) - 1;
+
+        let acorn_max = if level < 10 {
+            2u16.pow(level) >> 1
+        } else {
+            2u16.pow(level)
+        };
+
+        for acorn_bitmask in 0..acorn_max {
+            let save_data = SaveData {
+                level_bitmask,
+                acorn_bitmask,
+            };
+
+            println!("{} -> {}", encode_password(&save_data), save_data);
+        }
     }
 }
 
 fn main() {
-    main_test_passwords();
+    //main_test_passwords();
     main_hardcoded_passwords();
-    main_brute_force();
+    main_dump_valid_level_passwords();
 }
