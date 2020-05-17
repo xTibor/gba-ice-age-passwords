@@ -1,0 +1,110 @@
+<html>
+
+<head>
+    <style>
+        td {
+            text-align: center;
+            vertical-align: middle;
+        }
+    </style>
+    <script>
+        function $(s) {
+            return document.getElementById(s);
+        }
+
+        function updatePassword() {
+            let level = 0;
+            for (let i = 1; i <= 10; ++i)
+                level += $("l" + i).checked ? Math.pow(2, i - 1) : 0;
+
+            let acorn = 0;
+            for (let i = 1; i <= 10; ++i)
+                acorn += $("a" + i).checked ? Math.pow(2, i - 1) : 0;
+
+            if ((level & (level + 1)) || (level == 0)) {
+                $("password").value = "";
+                return;
+            }
+
+            let password = [0, 0, 0, 0, 0, 0];
+            password[1] = 1 + ((level & 0x3C0) >> 6) & 0xFF;
+            password[2] = 2 + ((level & 0x03C) >> 2) & 0xFF;
+            password[3] = 3 + ((((level & 0x003) << 2) & 0xFF) | ((acorn >> 8) & 0xFF & 0x003));
+            password[4] = 4 + ((acorn & 0x0F0) >> 4) & 0xFF;
+            password[5] = 5 + ((acorn & 0x00F) >> 0) & 0xFF;
+            password[0] = (password[1] + password[2] + password[3] + password[4] + password[5]) & 0x0F;
+
+            let characterSet = ['B', 'C', 'D', 'F', 'G', 'H', 'J', 'K', 'L', 'M', 'N', 'P', 'Q', 'R', 'S', 'T', 'V'];
+            let result = "";
+            for (let i = 0; i < 6; ++i) {
+                result += characterSet[password[i] - i];
+            }
+
+            $("password").value = result;
+        }
+
+        window.addEventListener("load", function () {
+            updatePassword();
+
+            for (let i = 1; i <= 10; ++i) {
+                $("l" + i).addEventListener("change", updatePassword);
+                $("a" + i).addEventListener("change", updatePassword);
+            }
+        });
+    </script>
+</head>
+
+<body>
+    <h1>Ice Age level password generator</h1>
+    <p>
+    <table>
+        <tr>
+            <td></td>
+            <td>1</td>
+            <td>2</td>
+            <td>3</td>
+            <td>4</td>
+            <td>5</td>
+            <td>6</td>
+            <td>7</td>
+            <td>8</td>
+            <td>9</td>
+            <td>10</td>
+        </tr>
+        <tr>
+            <td>Levels</td>
+            <td><input type="checkbox" id="l1"></td>
+            <td><input type="checkbox" id="l2"></td>
+            <td><input type="checkbox" id="l3"></td>
+            <td><input type="checkbox" id="l4"></td>
+            <td><input type="checkbox" id="l5"></td>
+            <td><input type="checkbox" id="l6"></td>
+            <td><input type="checkbox" id="l7"></td>
+            <td><input type="checkbox" id="l8"></td>
+            <td><input type="checkbox" id="l9"></td>
+            <td><input type="checkbox" id="l10"></td>
+        </tr>
+        <tr>
+            <td>Acorns</td>
+            <td><input type="checkbox" id="a1"></td>
+            <td><input type="checkbox" id="a2"></td>
+            <td><input type="checkbox" id="a3"></td>
+            <td><input type="checkbox" id="a4"></td>
+            <td><input type="checkbox" id="a5"></td>
+            <td><input type="checkbox" id="a6"></td>
+            <td><input type="checkbox" id="a7"></td>
+            <td><input type="checkbox" id="a8"></td>
+            <td><input type="checkbox" id="a9"></td>
+            <td><input type="checkbox" id="a10"></td>
+        </tr>
+    </table>
+    </p>
+    <p>
+        <label for="password">Password:</label> <input type="text" readonly id="password">
+    </p>
+    <p>
+        <small>GitHub: <a href="https://github.com/xTibor/gba-ice-age-passwords">xTibor/gba-ice-age-passwords</a></small>
+    </p>
+</body>
+
+</html>
